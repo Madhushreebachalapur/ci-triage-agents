@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q --tb=short 2>&1 | tee pytest.log
+
+      - name: Triage failures
+        if: steps.tests.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: |
+          set -o pipefail
+          python orchestrator/ci_triage.py --log pytest.log --ci 2>&1 | tee triage.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload CI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: |
+            pytest.log
+            triage.md
+          if-no-files-found: ignore
+
+      - name: Fail job
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
